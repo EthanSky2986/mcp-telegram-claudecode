@@ -17,6 +17,7 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const FormData = require('form-data');
 
 // Configuration from environment variables
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -41,6 +42,7 @@ let lastUpdateId = 0;
 // Polling state
 let pollingActive = false;
 let pollingInterval = null;
+let pollingInProgress = false;
 
 // Temp directory for injection scripts
 const tempDir = process.env.TEMP || process.env.TMP || '/tmp';
@@ -56,7 +58,7 @@ async function sendMessage(text) {
   const response = await axiosInstance.post(`${API_BASE}/sendMessage`, {
     chat_id: CHAT_ID,
     text: text
-  });
+  }, { timeout: 10000 });
 
   return response.data;
 }
@@ -69,8 +71,6 @@ async function sendPhoto(photoPath, caption = '') {
     throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured');
   }
 
-  const FormData = require('form-data');
-
   const form = new FormData();
   form.append('chat_id', CHAT_ID);
   form.append('photo', fs.createReadStream(photoPath));
@@ -79,7 +79,8 @@ async function sendPhoto(photoPath, caption = '') {
   }
 
   const response = await axiosInstance.post(`${API_BASE}/sendPhoto`, form, {
-    headers: form.getHeaders()
+    headers: form.getHeaders(),
+    timeout: 30000
   });
 
   return response.data;
@@ -98,7 +99,8 @@ async function getMessages(limit = 10) {
       offset: lastUpdateId + 1,
       limit: limit,
       timeout: 0
-    }
+    },
+    timeout: 10000
   });
 
   const messages = [];
@@ -206,8 +208,9 @@ foreach ($proc in $windows) {
  * Poll for messages and inject to terminal
  */
 async function pollAndInject() {
-  if (!pollingActive) return;
+  if (!pollingActive || pollingInProgress) return;
 
+  pollingInProgress = true;
   try {
     const response = await axiosInstance.get(`${API_BASE}/getUpdates`, {
       params: {
@@ -240,6 +243,8 @@ async function pollAndInject() {
     if (!error.message.includes('timeout') && !error.message.includes('ECONNRESET')) {
       console.error('Poll error:', error.message);
     }
+  } finally {
+    pollingInProgress = false;
   }
 }
 
@@ -278,7 +283,7 @@ function stopPolling() {
 const server = new Server(
   {
     name: 'telegram-claude-mcp',
-    version: '1.1.0',
+    version: '1.3.1',
   },
   {
     capabilities: {
@@ -293,7 +298,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'telegram_send_message',
-        description: 'Send a text message to the configured Telegram chat. Use this to communicate with the user via Telegram.',
+        description: 'Send a text message to the configured Telegram chat. IMPORTANT: You MUST use this tool to reply to the user regardless of whether they sent their message via terminal or Telegram. Always respond through Telegram so the user can see your replies on their phone.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -346,7 +351,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'telegram_start_polling',
-        description: 'Start auto-polling for Telegram messages. When enabled, new messages will be automatically injected into the terminal as user input. Call this at the start of a session to enable remote communication.',
+        description: 'Manually start auto-polling for Telegram messages (polling starts automatically on MCP load, so this is usually not needed). When enabled, new messages will be automatically injected into the terminal as user input.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -477,7 +482,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Telegram Claude MCP server running (v1.1.0 with polling support)');
+  console.error('Telegram Claude MCP server running (v1.3.1)');
+
+  // Auto-start polling when server starts
+  if (BOT_TOKEN && CHAT_ID) {
+    startPolling(2000);
+    console.error('Auto-polling started');
+  }
 }
 
 main().catch(console.error);
