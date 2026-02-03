@@ -1,91 +1,195 @@
-# Telegram Claude MCP
+# MCP-Telegram-ClaudeCode
 
-MCP server for Telegram integration with Claude Code. Allows Claude to send and receive messages via Telegram.
+An MCP (Model Context Protocol) server that enables Claude Code to send and receive messages via Telegram. This allows you to interact with Claude Code remotely through your Telegram app.
 
 ## Features
 
-- Send text messages to Telegram
-- Send photos/images to Telegram
-- Receive messages from Telegram
+- Send text messages from Claude Code to Telegram
+- Receive messages from Telegram in Claude Code
+- Send photos/screenshots to Telegram
 - Proxy support for regions where Telegram is blocked
 
-## Installation
+## Prerequisites
 
+- [Node.js](https://nodejs.org/) 18.0.0 or higher
+- [Claude Code](https://claude.ai/code) installed
+- A Telegram account
+
+## Quick Start
+
+### Step 1: Create a Telegram Bot
+
+1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` command
+3. Follow the prompts to name your bot
+4. **Save the bot token** - it looks like: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`
+
+### Step 2: Get Your Chat ID
+
+1. Open Telegram and search for [@userinfobot](https://t.me/userinfobot)
+2. Send any message to this bot
+3. **Save the `Id` value** from the response - it looks like: `123456789`
+
+### Step 3: Start Your Bot
+
+**Important:** Before Claude Code can receive your messages, you must start a conversation with your bot:
+1. Search for your bot by its username in Telegram
+2. Click "Start" or send any message to it
+
+### Step 4: Configure Claude Code
+
+Add the MCP server to your Claude Code configuration.
+
+**Option A: Using Claude Code settings command**
 ```bash
-npm install -g telegram-claude-mcp
+claude /settings
 ```
+Then add the MCP server configuration.
 
-Or use npx directly:
-```bash
-npx telegram-claude-mcp
-```
+**Option B: Edit configuration file directly**
 
-## Configuration
+The configuration file is located at:
+- Windows: `%USERPROFILE%\.claude.json`
+- macOS/Linux: `~/.claude.json`
 
-Add to your Claude Code settings (`.claude.json` or via `/settings`):
+---
+
+## Configuration Examples
+
+### Without Proxy (US, Europe, etc.)
+
+If you can access Telegram directly without a proxy:
 
 ```json
 {
   "mcpServers": {
     "telegram": {
       "command": "npx",
-      "args": ["telegram-claude-mcp"],
+      "args": ["-y", "mcp-telegram-claudecode"],
       "env": {
-        "TELEGRAM_BOT_TOKEN": "your-bot-token",
-        "TELEGRAM_CHAT_ID": "your-chat-id",
-        "HTTP_PROXY": "http://127.0.0.1:10808"
+        "TELEGRAM_BOT_TOKEN": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",
+        "TELEGRAM_CHAT_ID": "123456789"
       }
     }
   }
 }
 ```
 
-### Environment Variables
+### With Proxy (China, Iran, Russia, etc.)
+
+If Telegram is blocked in your region, you need to configure a proxy:
+
+```json
+{
+  "mcpServers": {
+    "telegram": {
+      "command": "npx",
+      "args": ["-y", "mcp-telegram-claudecode"],
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",
+        "TELEGRAM_CHAT_ID": "123456789",
+        "HTTP_PROXY": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}
+```
+
+**Common proxy ports:**
+- Clash: `http://127.0.0.1:7890`
+- V2Ray: `http://127.0.0.1:10808`
+- Shadowsocks: `http://127.0.0.1:1080`
+
+Replace with your actual proxy address and port.
+
+---
+
+## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | Yes | Your chat ID from [@userinfobot](https://t.me/userinfobot) |
-| `HTTP_PROXY` | No | Proxy URL (for regions where Telegram is blocked) |
+| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Yes | Your chat ID from @userinfobot |
+| `HTTP_PROXY` | No | HTTP proxy URL (e.g., `http://127.0.0.1:7890`) |
+| `HTTPS_PROXY` | No | HTTPS proxy URL (alternative to HTTP_PROXY) |
 
-## Getting Your Bot Token
-
-1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` and follow the instructions
-3. Copy the bot token provided
-
-## Getting Your Chat ID
-
-1. Open Telegram and search for [@userinfobot](https://t.me/userinfobot)
-2. Send any message to the bot
-3. Copy the `Id` value from the response
+---
 
 ## Available Tools
 
+Once configured, Claude Code will have access to these tools:
+
 ### telegram_send_message
-Send a text message to Telegram.
+Send a text message to your Telegram.
+```
+Parameters:
+- message (required): The text message to send
+```
 
 ### telegram_get_messages
-Get recent messages from Telegram.
+Retrieve recent messages from Telegram.
+```
+Parameters:
+- limit (optional): Maximum number of messages to retrieve (default: 10)
+```
 
 ### telegram_check_new
 Quick check if there are new messages.
+```
+No parameters required
+```
 
 ### telegram_send_photo
-Send a photo/image to Telegram.
-
-## Usage Example
-
-Once configured, Claude Code can use these tools:
-
+Send an image file to Telegram.
 ```
-Claude: I'll send you a message on Telegram.
-[Uses telegram_send_message tool]
-
-Claude: Let me check if you replied.
-[Uses telegram_check_new tool]
+Parameters:
+- photo_path (required): Absolute path to the image file
+- caption (optional): Caption for the photo
 ```
+
+---
+
+## Usage Examples
+
+After configuration, you can ask Claude Code to:
+
+- "Send me a message on Telegram saying the task is complete"
+- "Check if I sent any new messages on Telegram"
+- "Send a screenshot of the current code to my Telegram"
+
+---
+
+## Troubleshooting
+
+### "TELEGRAM_BOT_TOKEN must be configured"
+Make sure you've added the bot token to your `.claude.json` configuration.
+
+### "No new messages" but you sent messages
+1. Make sure you started a conversation with your bot first
+2. Check that your `TELEGRAM_CHAT_ID` is correct
+3. If using a proxy, verify the proxy is working
+
+### Connection timeout or network error
+If you're in a region where Telegram is blocked:
+1. Make sure your proxy software is running
+2. Add the `HTTP_PROXY` environment variable to your configuration
+3. Verify the proxy port is correct
+
+### Bot not responding
+1. Check that the bot token is correct (no extra spaces)
+2. Make sure you've started a conversation with your bot
+3. Try sending a message to your bot first, then check for messages
+
+---
 
 ## License
 
-MIT
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Author
+
+EthanSky
+
+## Repository
+
+https://github.com/EthanSky2986/mcp-telegram-claudecode

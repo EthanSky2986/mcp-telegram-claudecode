@@ -1,10 +1,10 @@
 {
-  "name": "telegram-claude-mcp",
+  "name": "mcp-telegram-claudecode",
   "version": "1.0.0",
   "description": "MCP server for Telegram integration with Claude Code - Send and receive messages via Telegram",
   "main": "index.js",
   "bin": {
-    "telegram-claude-mcp": "./index.js"
+    "mcp-telegram-claudecode": "./index.js"
   },
   "scripts": {
     "start": "node index.js"
@@ -15,7 +15,8 @@
     "claude",
     "claude-code",
     "remote-control",
-    "bot"
+    "bot",
+    "anthropic"
   ],
   "author": "EthanSky",
   "license": "MIT",
@@ -29,6 +30,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/EthanSky/telegram-claude-mcp"
+    "url": "https://github.com/EthanSky2986/mcp-telegram-claudecode"
   }
 }
