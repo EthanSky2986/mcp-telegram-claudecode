@@ -182,6 +182,93 @@ claude /settings
 
 ---
 
+## 工作原理
+
+### 架构
+
+这个 MCP 服务器充当 Claude Code 和 Telegram 之间的桥梁：
+
+```
+┌─────────────┐     MCP 协议         ┌─────────────────┐     Telegram API     ┌──────────┐
+│ Claude Code │ ◄──────────────────► │ MCP 服务器      │ ◄─────────────────► │ Telegram │
+│             │                       │ (本项目)        │                      │          │
+└─────────────┘                       └─────────────────┘                      └──────────┘
+```
+
+### 自动轮询与终端注入（实验性功能）
+
+MCP 服务器启动时会自动开始轮询 Telegram 新消息。收到消息后，会尝试将文本注入到活动的终端窗口：
+
+1. **剪贴板**：消息被复制到系统剪贴板
+2. **SendKeys (Windows)**：PowerShell 脚本模拟 Ctrl+V 和 Enter 按键
+3. **窗口激活**：尝试查找并激活终端窗口（Windows Terminal、cmd、PowerShell、VS Code）
+
+**这是一个实验性功能** - 它可以实现通过 Telegram "远程控制" Claude Code，但存在可靠性限制。
+
+### 可用工具
+
+| 工具 | 说明 |
+|------|------|
+| `telegram_send_message` | 发送文字到 Telegram |
+| `telegram_get_messages` | 获取最近消息 |
+| `telegram_check_new` | 快速检查新消息 |
+| `telegram_send_photo` | 发送图片到 Telegram |
+| `telegram_start_polling` | 手动启动自动轮询 |
+| `telegram_stop_polling` | 停止自动轮询 |
+
+---
+
+## 已知问题与限制
+
+### ⚠️ 多个 Claude Code 实例
+
+**问题**：如果运行多个 Claude Code 窗口，每个都会启动自己的 MCP 服务器实例。所有实例都会轮询同一个 Telegram 机器人，导致：
+- 消息重复处理
+- 多次注入尝试
+- 重复回复
+
+**解决方法**：使用 Telegram 集成时只运行一个 Claude Code 实例，或在其他实例中禁用 Telegram MCP。
+
+### ⚠️ SendKeys 可靠性 (Windows)
+
+终端注入功能依赖于：
+- **窗口焦点**：目标终端必须可以被激活
+- **剪贴板访问**：系统剪贴板必须可用
+- **时序控制**：SendKeys 需要精确的时序
+
+**可能失败的情况**：
+- 其他应用程序占用焦点且不释放
+- 系统负载过高
+- 远程桌面或虚拟机环境
+- 屏幕被锁定
+
+**解决方法**：如果注入失败，可以手动使用 `telegram_get_messages` 工具检查消息。
+
+### ⚠️ 平台支持
+
+- **Windows**：完整支持（自动轮询 + SendKeys 注入）
+- **macOS/Linux**：部分支持（工具可用，但未实现自动注入）
+
+### ⚠️ 非完全无人值守
+
+这个 MCP 无法主动唤醒 Claude Code。自动注入只在以下情况下有效：
+- Claude Code 正在运行并等待输入
+- 终端窗口可以被访问
+
+如需真正的无人值守操作，请考虑使用 Claude Code 的 Hook 系统。
+
+---
+
+## 计划改进
+
+- [ ] 锁文件机制防止多实例冲突
+- [ ] 注入失败重试逻辑
+- [ ] 通过 Telegram 发送失败通知
+- [ ] 失败消息队列
+- [ ] macOS/Linux 注入支持
+
+---
+
 ## 许可证
 
 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
