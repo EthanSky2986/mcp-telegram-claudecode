@@ -56,9 +56,9 @@ The configuration file is located at:
 
 ## Configuration Examples
 
-### Without Proxy (US, Europe, etc.)
+### Without Proxy
 
-If you can access Telegram directly without a proxy:
+If you can access Telegram directly:
 
 ```json
 {
@@ -75,9 +75,9 @@ If you can access Telegram directly without a proxy:
 }
 ```
 
-### With Proxy (China, Iran, Russia, etc.)
+### With Proxy
 
-If Telegram is blocked in your region, you need to configure a proxy:
+If you need a proxy to access Telegram:
 
 ```json
 {
