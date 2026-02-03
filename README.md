@@ -182,6 +182,93 @@ If you're in a region where Telegram is blocked:
 
 ---
 
+## How It Works
+
+### Architecture
+
+This MCP server acts as a bridge between Claude Code and Telegram:
+
+```
+┌─────────────┐     MCP Protocol      ┌─────────────────┐     Telegram API     ┌──────────┐
+│ Claude Code │ ◄──────────────────► │ MCP Server      │ ◄─────────────────► │ Telegram │
+│             │                       │ (this project)  │                      │          │
+└─────────────┘                       └─────────────────┘                      └──────────┘
+```
+
+### Auto-Polling & Terminal Injection (Experimental)
+
+When the MCP server starts, it automatically begins polling for new Telegram messages. When a message is received, it attempts to inject the text into the active terminal window using:
+
+1. **Clipboard**: Message is copied to system clipboard
+2. **SendKeys (Windows)**: PowerShell script simulates Ctrl+V and Enter keystrokes
+3. **Window Activation**: Attempts to find and activate terminal windows (Windows Terminal, cmd, PowerShell, VS Code)
+
+**This is an experimental feature** - it enables "remote control" of Claude Code via Telegram, but has reliability limitations.
+
+### Tools Available
+
+| Tool | Description |
+|------|-------------|
+| `telegram_send_message` | Send text to Telegram |
+| `telegram_get_messages` | Retrieve recent messages |
+| `telegram_check_new` | Quick check for new messages |
+| `telegram_send_photo` | Send images to Telegram |
+| `telegram_start_polling` | Manually start auto-polling |
+| `telegram_stop_polling` | Stop auto-polling |
+
+---
+
+## Known Issues & Limitations
+
+### ⚠️ Multiple Claude Code Instances
+
+**Problem**: If you run multiple Claude Code windows, each will start its own MCP server instance. All instances will poll the same Telegram bot, causing:
+- Duplicate message processing
+- Multiple injection attempts
+- Duplicate responses
+
+**Workaround**: Only run one Claude Code instance when using Telegram integration, or disable the Telegram MCP in additional instances.
+
+### ⚠️ SendKeys Reliability (Windows)
+
+The terminal injection feature depends on:
+- **Window focus**: Target terminal must be activatable
+- **Clipboard access**: System clipboard must be available
+- **Timing**: SendKeys requires precise timing
+
+**When it may fail**:
+- Another application has focus and won't release it
+- System is under heavy load
+- Remote desktop or virtual machine environments
+- Screen is locked
+
+**Workaround**: If injection fails, manually check Telegram messages using the `telegram_get_messages` tool.
+
+### ⚠️ Platform Support
+
+- **Windows**: Full support (auto-polling + SendKeys injection)
+- **macOS/Linux**: Partial support (tools work, but auto-injection not implemented)
+
+### ⚠️ Not Fully Unattended
+
+This MCP cannot wake up Claude Code on its own. The auto-injection only works when:
+- Claude Code is running and waiting for input
+- A terminal window is accessible
+
+For true unattended operation, consider using Claude Code's hook system instead.
+
+---
+
+## Planned Improvements
+
+- [ ] Lock file mechanism to prevent multiple instance conflicts
+- [ ] Retry logic for failed injections
+- [ ] Failure notifications via Telegram
+- [ ] Message queue for failed injections
+- [ ] macOS/Linux injection support
+
+---
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
