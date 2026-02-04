@@ -13,6 +13,8 @@ An MCP (Model Context Protocol) server that enables Claude Code to send and rece
 - Receive messages from Telegram in Claude Code
 - Send photos/screenshots to Telegram
 - Proxy support for regions where Telegram is blocked
+- **NEW: Remote permission approval via hooks** - Approve/deny sensitive operations from your phone
+- **NEW: Lock file mechanism** - Prevents multiple instance conflicts
 
 ## Prerequisites
 
@@ -187,6 +189,58 @@ If you're in a region where Telegram is blocked:
 
 ---
 
+## Remote Permission Approval (Recommended)
+
+Instead of using `--dangerously-skip-permissions`, you can use Claude Code hooks to approve sensitive operations remotely via Telegram.
+
+### How It Works
+
+```
+┌─────────────┐     PreToolUse Hook     ┌─────────────────┐     Telegram API     ┌──────────┐
+│ Claude Code │ ──────────────────────► │ Hook Script     │ ◄─────────────────► │ Telegram │
+│ (sensitive  │                         │ (asks approval) │                      │ (you)    │
+│  operation) │ ◄────────────────────── │                 │                      │          │
+└─────────────┘     approve/deny        └─────────────────┘                      └──────────┘
+```
+
+1. Claude Code attempts a sensitive operation (Edit, Write, Bash)
+2. PreToolUse hook sends details to your Telegram
+3. You reply **Y** to approve or **N** to deny
+4. Hook returns the decision to Claude Code
+
+### Setup
+
+1. Copy the hooks to your system (included in `hooks/` directory)
+2. Configure Claude Code hooks via `/hooks` command or edit settings:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          "node /path/to/telegram-claude-mcp/hooks/pretool-approval.js"
+        ]
+      }
+    ]
+  }
+}
+```
+
+3. Set environment variables (same as MCP server config)
+
+See [hooks/README.md](hooks/README.md) for detailed setup instructions.
+
+### Approval Responses
+
+| Approve | Deny |
+|---------|------|
+| Y, yes, 1, approve | N, no, 0, deny |
+| 是, 好, 可以 | 否, 不, 拒绝 |
+
+---
+
 ## How It Works
 
 ### Architecture
@@ -225,61 +279,81 @@ When the MCP server starts, it automatically begins polling for new Telegram mes
 
 ## Known Issues & Limitations
 
-### ⚠️ Multiple Claude Code Instances
+### ✅ Multiple Claude Code Instances (Fixed in v1.4.0)
 
-**Problem**: If you run multiple Claude Code windows, each will start its own MCP server instance. All instances will poll the same Telegram bot, causing:
-- Duplicate message processing
-- Multiple injection attempts
-- Duplicate responses
+**Problem**: If you run multiple Claude Code windows, each will start its own MCP server instance.
 
-**Workaround**: Only run one Claude Code instance when using Telegram integration, or disable the Telegram MCP in additional instances.
+**Solution**: Lock file mechanism now prevents multiple instances from polling simultaneously. Only the first instance will poll; others will skip polling automatically.
+
+### ✅ Injection Failure Notification (Fixed in v1.4.0)
+
+**Problem**: When SendKeys injection fails, you wouldn't know about it.
+
+**Solution**: Failed injections now send a notification to Telegram, so you know when to check manually.
+
+### ✅ Permission Prompts (Solved with Hooks)
+
+**Problem**: Cannot approve sensitive operations remotely.
+
+**Solution**: Use the included PreToolUse hooks for remote approval via Telegram. See [Remote Permission Approval](#remote-permission-approval-recommended) section.
 
 ### ⚠️ SendKeys Reliability (Windows)
 
-The terminal injection feature depends on:
-- **Window focus**: Target terminal must be activatable
-- **Clipboard access**: System clipboard must be available
-- **Timing**: SendKeys requires precise timing
+The terminal injection feature uses `WriteConsoleInput` API for no-focus injection:
+
+**How it works:**
+- Uses Windows Console API to write directly to the console input buffer
+- Does not require window focus
+- Does not use clipboard
+- Works when other applications are active
+
+**Limitation - Single Terminal Only:**
+- Works correctly when only one terminal window is open
+- If multiple terminals are open, messages may go to the wrong terminal
+- This is due to Windows Terminal's ConPTY architecture
 
 **When it may fail**:
-- Another application has focus and won't release it
-- System is under heavy load
+- Multiple terminal windows open simultaneously
 - Remote desktop or virtual machine environments
 - Screen is locked
 
-**Workaround**: If injection fails, manually check Telegram messages using the `telegram_get_messages` tool.
+**Workaround**: Use hooks instead of SendKeys for more reliable operation, or ensure only one terminal is open.
 
 ### ⚠️ Platform Support
 
-- **Windows**: Full support (auto-polling + SendKeys injection)
-- **macOS/Linux**: Partial support (tools work, but auto-injection not implemented)
+| Platform | MCP Tools | Auto-Injection | Hooks |
+|----------|-----------|----------------|-------|
+| Windows | ✅ Full | ✅ SendKeys | ✅ Full |
+| macOS | ✅ Full | ❌ Not implemented | ✅ Full |
+| Linux | ✅ Full | ❌ Not implemented | ✅ Full |
 
-### ⚠️ Not Fully Unattended
-
-This MCP cannot wake up Claude Code on its own. The auto-injection only works when:
-- Claude Code is running and waiting for input
-- A terminal window is accessible
-
-For true unattended operation, consider using Claude Code's hook system instead.
-
-### ⚠️ Permission Prompts Cannot Be Handled Remotely
-
-**Problem**: When Claude Code needs user confirmation for sensitive operations (file writes, command execution, etc.), you cannot approve them remotely via Telegram. Claude Code will wait at the permission prompt until you manually confirm at the terminal.
-
-**Workaround**:
-- Use `--dangerously-skip-permissions` flag if you trust the operations (not recommended for untrusted environments)
-- Set up allowed tools in your project's `.claude/settings.json` to pre-approve specific operations
-- Return to the terminal to manually approve when notified via Telegram
+**Recommendation**: Use hooks for cross-platform remote control.
 
 ---
 
-## Planned Improvements
+## Changelog
 
-- [ ] Lock file mechanism to prevent multiple instance conflicts
-- [ ] Retry logic for failed injections
-- [ ] Failure notifications via Telegram
-- [ ] Message queue for failed injections
-- [ ] macOS/Linux injection support
+### v1.4.0
+- ✅ Added lock file mechanism to prevent multiple instance conflicts
+- ✅ Added injection failure notifications via Telegram
+- ✅ Added PreToolUse hook for remote permission approval
+- ✅ Added PostToolUse hook for error notifications
+- ✅ Improved terminal injection with WriteConsoleInput API (no focus required)
+- ✅ Improved exit cleanup (SIGINT/SIGTERM handling)
+- ⚠️ Known limitation: Single terminal mode only (multiple terminals may cause injection to wrong window)
+
+### v1.3.0
+- Added photo sending support
+- Added proxy support
+
+### v1.2.0
+- Added auto-polling and terminal injection
+
+### v1.1.0
+- Added telegram_check_new tool
+
+### v1.0.0
+- Initial release
 
 ---
 
