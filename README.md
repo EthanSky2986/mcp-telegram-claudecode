@@ -1,5 +1,10 @@
 # MCP-Telegram-ClaudeCode
 
+[![npm version](https://img.shields.io/npm/v/mcp-telegram-claudecode.svg)](https://www.npmjs.com/package/mcp-telegram-claudecode)
+[![npm downloads](https://img.shields.io/npm/dm/mcp-telegram-claudecode.svg)](https://www.npmjs.com/package/mcp-telegram-claudecode)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+
 An MCP (Model Context Protocol) server that enables Claude Code to send and receive messages via Telegram. This allows you to interact with Claude Code remotely through your Telegram app.
 
 ## Features
