@@ -262,6 +262,15 @@ MCP 服务器启动时会自动开始轮询 Telegram 新消息。收到消息后
 
 如需真正的无人值守操作，请考虑使用 Claude Code 的 Hook 系统。
 
+### ⚠️ 无法远程处理权限确认
+
+**问题**：当 Claude Code 需要用户确认敏感操作（写入文件、执行命令等）时，你无法通过 Telegram 远程批准。Claude Code 会在权限提示处等待，直到你在终端手动确认。
+
+**解决方法**：
+- 使用 `--dangerously-skip-permissions` 参数跳过权限确认（不建议在不信任的环境中使用）
+- 在项目的 `.claude/settings.json` 中预先配置允许的工具
+- 收到 Telegram 通知后回到终端手动确认
+
 ---
 
 ## 计划改进
