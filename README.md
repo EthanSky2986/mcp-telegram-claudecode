@@ -262,6 +262,15 @@ This MCP cannot wake up Claude Code on its own. The auto-injection only works wh
 
 For true unattended operation, consider using Claude Code's hook system instead.
 
+### ⚠️ Permission Prompts Cannot Be Handled Remotely
+
+**Problem**: When Claude Code needs user confirmation for sensitive operations (file writes, command execution, etc.), you cannot approve them remotely via Telegram. Claude Code will wait at the permission prompt until you manually confirm at the terminal.
+
+**Workaround**:
+- Use `--dangerously-skip-permissions` flag if you trust the operations (not recommended for untrusted environments)
+- Set up allowed tools in your project's `.claude/settings.json` to pre-approve specific operations
+- Return to the terminal to manually approve when notified via Telegram
+
 ---
 
 ## Planned Improvements
