@@ -515,7 +515,7 @@ function stopPolling() {
 const server = new Server(
   {
     name: 'telegram-claude-mcp',
-    version: '1.4.0',
+    version: '1.4.1',
   },
   {
     capabilities: {
