@@ -1,5 +1,10 @@
 # MCP-Telegram-ClaudeCode
 
+[![npm version](https://img.shields.io/npm/v/mcp-telegram-claudecode.svg)](https://www.npmjs.com/package/mcp-telegram-claudecode)
+[![npm downloads](https://img.shields.io/npm/dm/mcp-telegram-claudecode.svg)](https://www.npmjs.com/package/mcp-telegram-claudecode)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+
 一个 MCP（Model Context Protocol）服务器，让 Claude Code 能够通过 Telegram 发送和接收消息。这样你就可以通过 Telegram 远程与 Claude Code 交互。
 
 ## 功能特性
