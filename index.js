@@ -58,10 +58,30 @@ function isPollingLocked() {
     if (fs.existsSync(lockFilePath)) {
       const lockData = JSON.parse(fs.readFileSync(lockFilePath, 'utf8'));
       const lockAge = Date.now() - lockData.timestamp;
+
       // Lock expires after 30 seconds (in case of crash)
-      if (lockAge < 30000) {
-        return true;
+      if (lockAge >= 30000) {
+        return false;
       }
+
+      // Check if the process that holds the lock is still running
+      if (lockData.pid && lockData.pid !== process.pid) {
+        try {
+          // process.kill(pid, 0) throws if process doesn't exist
+          process.kill(lockData.pid, 0);
+          // Process is still running, lock is valid
+          return true;
+        } catch {
+          // Process is not running, lock is stale - clean it up
+          try {
+            fs.unlinkSync(lockFilePath);
+          } catch {}
+          return false;
+        }
+      }
+
+      // Lock is held by current process
+      return false;
     }
     return false;
   } catch {
@@ -158,6 +178,52 @@ async function sendPhoto(photoPath, caption = '') {
 }
 
 /**
+ * Send a video to Telegram
+ */
+async function sendVideo(videoPath, caption = '') {
+  if (!BOT_TOKEN || !CHAT_ID) {
+    throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured');
+  }
+
+  const form = new FormData();
+  form.append('chat_id', CHAT_ID);
+  form.append('video', fs.createReadStream(videoPath));
+  if (caption) {
+    form.append('caption', caption);
+  }
+
+  const response = await axiosInstance.post(`${API_BASE}/sendVideo`, form, {
+    headers: form.getHeaders(),
+    timeout: 300000  // 5 minutes timeout for large videos
+  });
+
+  return response.data;
+}
+
+/**
+ * Send a document/file to Telegram
+ */
+async function sendDocument(documentPath, caption = '') {
+  if (!BOT_TOKEN || !CHAT_ID) {
+    throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be configured');
+  }
+
+  const form = new FormData();
+  form.append('chat_id', CHAT_ID);
+  form.append('document', fs.createReadStream(documentPath));
+  if (caption) {
+    form.append('caption', caption);
+  }
+
+  const response = await axiosInstance.post(`${API_BASE}/sendDocument`, form, {
+    headers: form.getHeaders(),
+    timeout: 300000  // 5 minutes timeout for large files
+  });
+
+  return response.data;
+}
+
+/**
  * Get new messages from Telegram
  */
 async function getMessages(limit = 10) {
@@ -232,8 +298,8 @@ async function checkNewMessages() {
 }
 
 /**
- * Inject text into terminal using inherited console
- * The spawned PowerShell inherits the console from Node.js MCP
+ * Inject text into terminal using SendInput API
+ * Finds and activates terminal window, then sends keyboard events
  * Returns: { success: boolean, error?: string, method?: string }
  */
 function injectToTerminal(text) {
@@ -246,43 +312,230 @@ function injectToTerminal(text) {
     const BOM = '\uFEFF';
     fs.writeFileSync(tempFile, BOM + singleLine, 'utf8');
 
-    // Create PowerShell script - use inherited console directly
+    // Create PowerShell script using SendInput API
     const scriptPath = path.join(tempDir, 'telegram-mcp-inject.ps1');
     const script = `
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
+using System.Text;
 
-public class ConsoleAPI {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern IntPtr GetStdHandle(int nStdHandle);
+public class SendInputAPI {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    public static extern bool WriteConsoleInput(
-        IntPtr hConsoleInput,
-        INPUT_RECORD[] lpBuffer,
-        uint nLength,
-        out uint lpNumberOfEventsWritten);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 
-    public const int STD_INPUT_HANDLE = -10;
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    public const int SW_SHOW = 5;
+    public const byte VK_MENU = 0x12;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct INPUT {
+        public uint type;
+        public InputUnion u;
+    }
 
     [StructLayout(LayoutKind.Explicit)]
-    public struct INPUT_RECORD {
-        [FieldOffset(0)] public ushort EventType;
-        [FieldOffset(4)] public KEY_EVENT_RECORD KeyEvent;
+    public struct InputUnion {
+        [FieldOffset(0)] public MOUSEINPUT mi;
+        [FieldOffset(0)] public KEYBDINPUT ki;
+        [FieldOffset(0)] public HARDWAREINPUT hi;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct KEY_EVENT_RECORD {
-        public bool bKeyDown;
-        public ushort wRepeatCount;
-        public ushort wVirtualKeyCode;
-        public ushort wVirtualScanCode;
-        public char UnicodeChar;
-        public uint dwControlKeyState;
+    public struct MOUSEINPUT {
+        public int dx;
+        public int dy;
+        public uint mouseData;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
     }
 
-    public const ushort KEY_EVENT = 0x0001;
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KEYBDINPUT {
+        public ushort wVk;
+        public ushort wScan;
+        public uint dwFlags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HARDWAREINPUT {
+        public uint uMsg;
+        public ushort wParamL;
+        public ushort wParamH;
+    }
+
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_UNICODE = 0x0004;
+    public const ushort VK_RETURN = 0x0D;
+    public const ushort VK_CONTROL = 0x11;
+    public const ushort VK_V = 0x56;
+
+    private static List<IntPtr> foundWindows = new List<IntPtr>();
+
+    public static List<IntPtr> FindWindowsByTitle(string pattern) {
+        foundWindows.Clear();
+        EnumWindows((hWnd, lParam) => {
+            if (IsWindowVisible(hWnd)) {
+                StringBuilder sb = new StringBuilder(256);
+                GetWindowText(hWnd, sb, 256);
+                string title = sb.ToString();
+                if (title.Contains(pattern)) {
+                    foundWindows.Add(hWnd);
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return new List<IntPtr>(foundWindows);
+    }
+
+    public static List<IntPtr> FindWindowsByClassName(string className) {
+        foundWindows.Clear();
+        EnumWindows((hWnd, lParam) => {
+            if (IsWindowVisible(hWnd)) {
+                StringBuilder sb = new StringBuilder(256);
+                GetClassName(hWnd, sb, 256);
+                if (sb.ToString() == className) {
+                    foundWindows.Add(hWnd);
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return new List<IntPtr>(foundWindows);
+    }
+
+    public static bool ActivateWindow(IntPtr hWnd) {
+        if (hWnd == IntPtr.Zero) return false;
+
+        // Try multiple times to ensure window is activated
+        for (int i = 0; i < 3; i++) {
+            // Use Alt key trick to allow SetForegroundWindow from background process
+            keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
+            keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+            System.Threading.Thread.Sleep(50);
+
+            ShowWindow(hWnd, SW_SHOW);
+            SetForegroundWindow(hWnd);
+            System.Threading.Thread.Sleep(100);
+
+            // Verify the window is now in foreground
+            if (GetForegroundWindow() == hWnd) {
+                return true;
+            }
+        }
+        // Final attempt
+        return GetForegroundWindow() == hWnd;
+    }
+
+    public static uint SendCtrlV() {
+        var inputs = new List<INPUT>();
+        int size = Marshal.SizeOf(typeof(INPUT));
+
+        // Ctrl down
+        INPUT ctrlDown = new INPUT();
+        ctrlDown.type = INPUT_KEYBOARD;
+        ctrlDown.u.ki.wVk = VK_CONTROL;
+        ctrlDown.u.ki.dwFlags = 0;
+        inputs.Add(ctrlDown);
+
+        // V down
+        INPUT vDown = new INPUT();
+        vDown.type = INPUT_KEYBOARD;
+        vDown.u.ki.wVk = VK_V;
+        vDown.u.ki.dwFlags = 0;
+        inputs.Add(vDown);
+
+        // V up
+        INPUT vUp = new INPUT();
+        vUp.type = INPUT_KEYBOARD;
+        vUp.u.ki.wVk = VK_V;
+        vUp.u.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs.Add(vUp);
+
+        // Ctrl up
+        INPUT ctrlUp = new INPUT();
+        ctrlUp.type = INPUT_KEYBOARD;
+        ctrlUp.u.ki.wVk = VK_CONTROL;
+        ctrlUp.u.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs.Add(ctrlUp);
+
+        return SendInput((uint)inputs.Count, inputs.ToArray(), size);
+    }
+
+    // Send Unicode text directly via SendInput (no clipboard needed)
+    public static uint SendUnicodeText(string text) {
+        var inputs = new List<INPUT>();
+        int size = Marshal.SizeOf(typeof(INPUT));
+
+        foreach (char c in text) {
+            // Key down
+            INPUT keyDown = new INPUT();
+            keyDown.type = INPUT_KEYBOARD;
+            keyDown.u.ki.wVk = 0;
+            keyDown.u.ki.wScan = (ushort)c;
+            keyDown.u.ki.dwFlags = KEYEVENTF_UNICODE;
+            inputs.Add(keyDown);
+
+            // Key up
+            INPUT keyUp = new INPUT();
+            keyUp.type = INPUT_KEYBOARD;
+            keyUp.u.ki.wVk = 0;
+            keyUp.u.ki.wScan = (ushort)c;
+            keyUp.u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+            inputs.Add(keyUp);
+        }
+
+        if (inputs.Count == 0) return 0;
+        return SendInput((uint)inputs.Count, inputs.ToArray(), size);
+    }
+
+    public static uint SendEnter() {
+        var inputs = new List<INPUT>();
+        int size = Marshal.SizeOf(typeof(INPUT));
+
+        INPUT enterDown = new INPUT();
+        enterDown.type = INPUT_KEYBOARD;
+        enterDown.u.ki.wVk = VK_RETURN;
+        enterDown.u.ki.dwFlags = 0;
+        inputs.Add(enterDown);
+
+        INPUT enterUp = new INPUT();
+        enterUp.type = INPUT_KEYBOARD;
+        enterUp.u.ki.wVk = VK_RETURN;
+        enterUp.u.ki.dwFlags = KEYEVENTF_KEYUP;
+        inputs.Add(enterUp);
+
+        return SendInput((uint)inputs.Count, inputs.ToArray(), size);
+    }
 }
 "@
 
@@ -290,76 +543,55 @@ public class ConsoleAPI {
 $text = Get-Content -Path '${tempFile.replace(/\\/g, '\\\\')}' -Raw -Encoding UTF8
 $text = $text.TrimStart([char]0xFEFF).Trim()
 
-# Get the inherited console input handle directly
-$hInput = [ConsoleAPI]::GetStdHandle([ConsoleAPI]::STD_INPUT_HANDLE)
-
-if ($hInput -eq [IntPtr]::Zero -or $hInput -eq [IntPtr]::new(-1)) {
-    Write-Error "No console input handle"
+# CRITICAL: If text is empty, exit immediately without sending anything
+if ([string]::IsNullOrWhiteSpace($text)) {
+    Write-Error "Empty text detected - aborting injection"
     exit 1
 }
 
-# Create input records
-$inputRecords = New-Object System.Collections.ArrayList
+# Find terminal window by class name (not title - more reliable)
+$windows = [SendInputAPI]::FindWindowsByClassName("CASCADIA_HOSTING_WINDOW_CLASS")
+if (-not $windows) { $windows = [SendInputAPI]::FindWindowsByClassName("ConsoleWindowClass") }
 
-foreach ($char in $text.ToCharArray()) {
-    $keyDown = New-Object ConsoleAPI+INPUT_RECORD
-    $keyDown.EventType = [ConsoleAPI]::KEY_EVENT
-    $keyDown.KeyEvent = New-Object ConsoleAPI+KEY_EVENT_RECORD
-    $keyDown.KeyEvent.bKeyDown = $true
-    $keyDown.KeyEvent.wRepeatCount = 1
-    $keyDown.KeyEvent.wVirtualKeyCode = 0
-    $keyDown.KeyEvent.wVirtualScanCode = 0
-    $keyDown.KeyEvent.UnicodeChar = $char
-    $keyDown.KeyEvent.dwControlKeyState = 0
-    [void]$inputRecords.Add($keyDown)
-
-    $keyUp = New-Object ConsoleAPI+INPUT_RECORD
-    $keyUp.EventType = [ConsoleAPI]::KEY_EVENT
-    $keyUp.KeyEvent = New-Object ConsoleAPI+KEY_EVENT_RECORD
-    $keyUp.KeyEvent.bKeyDown = $false
-    $keyUp.KeyEvent.wRepeatCount = 1
-    $keyUp.KeyEvent.wVirtualKeyCode = 0
-    $keyUp.KeyEvent.wVirtualScanCode = 0
-    $keyUp.KeyEvent.UnicodeChar = $char
-    $keyUp.KeyEvent.dwControlKeyState = 0
-    [void]$inputRecords.Add($keyUp)
+if (-not $windows) {
+    Write-Error "No terminal window found"
+    exit 1
 }
 
-# Add Enter key
-$enterDown = New-Object ConsoleAPI+INPUT_RECORD
-$enterDown.EventType = [ConsoleAPI]::KEY_EVENT
-$enterDown.KeyEvent = New-Object ConsoleAPI+KEY_EVENT_RECORD
-$enterDown.KeyEvent.bKeyDown = $true
-$enterDown.KeyEvent.wRepeatCount = 1
-$enterDown.KeyEvent.wVirtualKeyCode = 0x0D
-$enterDown.KeyEvent.wVirtualScanCode = 0x1C
-$enterDown.KeyEvent.UnicodeChar = [char]13
-$enterDown.KeyEvent.dwControlKeyState = 0
-[void]$inputRecords.Add($enterDown)
+$targetWindow = @($windows)[0]
 
-$enterUp = New-Object ConsoleAPI+INPUT_RECORD
-$enterUp.EventType = [ConsoleAPI]::KEY_EVENT
-$enterUp.KeyEvent = New-Object ConsoleAPI+KEY_EVENT_RECORD
-$enterUp.KeyEvent.bKeyDown = $false
-$enterUp.KeyEvent.wRepeatCount = 1
-$enterUp.KeyEvent.wVirtualKeyCode = 0x0D
-$enterUp.KeyEvent.wVirtualScanCode = 0x1C
-$enterUp.KeyEvent.UnicodeChar = [char]13
-$enterUp.KeyEvent.dwControlKeyState = 0
-[void]$inputRecords.Add($enterUp)
+# Activate terminal window and verify it's in foreground
+$activated = [SendInputAPI]::ActivateWindow($targetWindow)
+Start-Sleep -Milliseconds 300
 
-# Write to console input
-$records = $inputRecords.ToArray([ConsoleAPI+INPUT_RECORD])
-$written = [uint32]0
+# CRITICAL: Verify the terminal window is now in foreground before sending any keys
+# This prevents injecting text into wrong windows (e.g., browser input fields)
+$currentForeground = [SendInputAPI]::GetForegroundWindow()
+if ($currentForeground -ne $targetWindow) {
+    Write-Error "Terminal window activation failed - wrong window has focus, aborting to prevent misinjection"
+    exit 1
+}
 
-$result = [ConsoleAPI]::WriteConsoleInput($hInput, $records, [uint32]$records.Length, [ref]$written)
+# Send text directly via SendInput Unicode (no clipboard needed - avoids race condition)
+$sent = [SendInputAPI]::SendUnicodeText($text)
+Start-Sleep -Milliseconds 100
 
-if ($result -and $written -gt 0) {
-    Write-Output "OK:InheritedConsole"
+# Double-check foreground window before pressing Enter
+$currentForeground = [SendInputAPI]::GetForegroundWindow()
+if ($currentForeground -ne $targetWindow) {
+    Write-Error "Terminal lost focus before Enter - aborting"
+    exit 1
+}
+
+# Send Enter
+$sent = [SendInputAPI]::SendEnter()
+
+if ($sent -gt 0) {
+    Write-Output "OK:SendInput"
     exit 0
 } else {
     $err = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-    Write-Error "WriteConsoleInput failed: $err"
+    Write-Error "SendInput failed: $err"
     exit 1
 }
 `;
@@ -373,17 +605,17 @@ if ($result -and $written -gt 0) {
 
     // Modify script to write success marker
     const scriptWithMarker = script.replace(
-      'Write-Output "OK:InheritedConsole"',
+      'Write-Output "OK:SendInput"',
       `Set-Content -Path '${successMarker.replace(/\\/g, '\\\\')}' -Value 'OK'`
     );
     fs.writeFileSync(scriptPath, scriptWithMarker);
 
-    // Run PowerShell script
+    // Run PowerShell script directly
     try {
       execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
         encoding: 'utf8',
         windowsHide: true,
-        timeout: 10000
+        timeout: 15000
       });
     } catch {
       // Ignore exit code errors
@@ -429,12 +661,22 @@ async function pollAndInject() {
       for (const update of response.data.result) {
         lastUpdateId = update.update_id;
 
+        // Debug logging: show what type of update we received
+        const updateKeys = Object.keys(update).filter(k => k !== 'update_id');
+        console.error(`[DEBUG] Update ${update.update_id}: keys=${updateKeys.join(',')}`);
+        if (update.message) {
+          console.error(`[DEBUG]   message.text="${update.message.text || '(none)'}", chat_id=${update.message.chat?.id}`);
+        }
+
         if (update.message && update.message.text) {
-          const text = update.message.text;
+          const text = update.message.text.trim();
           const chatId = update.message.chat.id.toString();
 
           // Only process messages from authorized chat
           if (CHAT_ID && chatId !== CHAT_ID) continue;
+
+          // Skip empty/whitespace-only messages
+          if (!text) continue;
 
           // Skip commands starting with /
           if (text.startsWith('/')) continue;
@@ -515,7 +757,7 @@ function stopPolling() {
 const server = new Server(
   {
     name: 'telegram-claude-mcp',
-    version: '1.4.1',
+    version: '1.5.0',
   },
   {
     capabilities: {
@@ -579,6 +821,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             }
           },
           required: ['photo_path']
+        }
+      },
+      {
+        name: 'telegram_send_video',
+        description: 'Send a video file to the configured Telegram chat. Supports mp4, mov, avi and other video formats. Max file size: 50MB.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            video_path: {
+              type: 'string',
+              description: 'Absolute path to the video file'
+            },
+            caption: {
+              type: 'string',
+              description: 'Optional caption for the video'
+            }
+          },
+          required: ['video_path']
+        }
+      },
+      {
+        name: 'telegram_send_document',
+        description: 'Send any file/document to the configured Telegram chat. Use this for files that are not photos or videos (e.g., zip, pdf, txt, etc.). Max file size: 50MB.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            document_path: {
+              type: 'string',
+              description: 'Absolute path to the file'
+            },
+            caption: {
+              type: 'string',
+              description: 'Optional caption for the document'
+            }
+          },
+          required: ['document_path']
         }
       },
       {
@@ -664,6 +942,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'telegram_send_video': {
+        const result = await sendVideo(args.video_path, args.caption || '');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Video sent successfully. Message ID: ${result.result.message_id}`
+            }
+          ]
+        };
+      }
+
+      case 'telegram_send_document': {
+        const result = await sendDocument(args.document_path, args.caption || '');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Document sent successfully. Message ID: ${result.result.message_id}`
+            }
+          ]
+        };
+      }
+
       case 'telegram_start_polling': {
         const result = startPolling(args.interval || 2000);
         if (result.success) {
@@ -714,7 +1016,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Telegram Claude MCP server running (v1.4.0)');
+  console.error('Telegram Claude MCP server running (v1.5.0)');
 
   // Auto-start polling when server starts
   if (BOT_TOKEN && CHAT_ID) {
